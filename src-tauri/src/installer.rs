@@ -133,34 +133,61 @@ pub async fn install(window: Window, install_dir: String, ram_mb: Option<u32>) -
         .map_err(|e| e.to_string())
 }
 
-/// Проверка обновлений. Возвращает список модов, которые изменились.
+/// Проверка обновлений. Возвращает список модов, которые изменились или устарели.
 #[tauri::command]
 pub async fn check_updates(install_dir: String) -> Result<Vec<String>, String> {
     let dir = PathBuf::from(&install_dir);
     let remote = manifest::fetch_remote().await.map_err(|e| e.to_string())?;
 
-    match manifest::read_local(&dir) {
-        Ok(local) if local.version == remote.version => Ok(vec![]),
-        _ => {
-            let changed: Vec<String> = remote
-                .mods
-                .iter()
-                .filter(|m| {
-                    let path = dir.join("mods").join(&m.name);
-                    !path.exists() || !verify_hash(&path, &m.sha256)
-                })
-                .map(|m| m.name.clone())
-                .collect();
-            Ok(changed)
+    let manifest_names: std::collections::HashSet<&str> =
+        remote.mods.iter().map(|m| m.name.as_str()).collect();
+
+    // Моды, которые нужно скачать/обновить
+    let mut changed: Vec<String> = remote
+        .mods
+        .iter()
+        .filter(|m| {
+            let path = dir.join("mods").join(&m.name);
+            !path.exists() || !verify_hash(&path, &m.sha256)
+        })
+        .map(|m| m.name.clone())
+        .collect();
+
+    // JAR-файлы в папке игрока, которых нет в манифесте — удалённые из сборки
+    if let Ok(entries) = std::fs::read_dir(dir.join("mods")) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy().into_owned();
+            if name_str.ends_with(".jar") && !manifest_names.contains(name_str.as_str()) {
+                changed.push(format!("[REMOVED] {}", name_str));
+            }
         }
     }
+
+    Ok(changed)
 }
 
-/// Применяет обновления (скачивает только изменившиеся файлы + обновляет конфиги).
+/// Применяет обновления (скачивает изменившиеся файлы, удаляет лишние + обновляет конфиги).
 #[tauri::command]
 pub async fn apply_updates(window: Window, install_dir: String) -> Result<String, String> {
     let dir = PathBuf::from(&install_dir);
     let remote = manifest::fetch_remote().await.map_err(|e| e.to_string())?;
+
+    let manifest_names: std::collections::HashSet<&str> =
+        remote.mods.iter().map(|m| m.name.as_str()).collect();
+
+    // Удаляем JAR-файлы, которых нет в манифесте (удалённые из сборки)
+    if let Ok(entries) = std::fs::read_dir(dir.join("mods")) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy().into_owned();
+            if name_str.ends_with(".jar") && !manifest_names.contains(name_str.as_str()) {
+                emit_progress(&window, "cleanup", 0.5,
+                    &format!("Удаляю устаревший мод: {}", name_str));
+                std::fs::remove_file(entry.path()).ok();
+            }
+        }
+    }
 
     let mods_to_update: Vec<_> = remote
         .mods
@@ -213,7 +240,22 @@ async fn run_install(window: Window, install_dir: PathBuf, ram_mb: u32) -> anyho
     emit_progress(&window, "forge", 0.0, "Установка Forge...");
     install_forge(&java_exe, &install_dir, &remote.forge, &window).await?;
 
-    // 5. Скачиваем моды
+    // 5. Удаляем моды, которых больше нет в сборке
+    let manifest_names: std::collections::HashSet<&str> =
+        remote.mods.iter().map(|m| m.name.as_str()).collect();
+    if let Ok(entries) = std::fs::read_dir(install_dir.join("mods")) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy().into_owned();
+            if name_str.ends_with(".jar") && !manifest_names.contains(name_str.as_str()) {
+                emit_progress(&window, "cleanup", 0.5,
+                    &format!("Удаляю устаревший мод: {}", name_str));
+                std::fs::remove_file(entry.path()).ok();
+            }
+        }
+    }
+
+    // 6. Скачиваем моды
     let total = remote.mods.len();
     for (i, entry) in remote.mods.iter().enumerate() {
         let dest = install_dir.join("mods").join(&entry.name);
@@ -230,14 +272,14 @@ async fn run_install(window: Window, install_dir: PathBuf, ram_mb: u32) -> anyho
     }
     emit_progress(&window, "mods", 1.0, "Моды загружены");
 
-    // 6. Скачиваем конфиги с GitHub
+    // 7. Скачиваем конфиги с GitHub
     emit_progress(&window, "configs", 0.0, "Загрузка конфигов...");
     update_configs(&install_dir, &remote).await?;
 
-    // 7. Сохраняем manifest
+    // 8. Сохраняем manifest
     manifest::save_local(&install_dir, &remote)?;
 
-    // 8. Создаём профиль в launcher если возможно
+    // 9. Создаём профиль в launcher если возможно
     let forge_version = format!("1.20.1-forge-{}", remote.forge.trim_start_matches("1.20.1-"));
     if let Some(profiles_path) = profile::find_launcher_profiles() {
         if let Err(e) = profile::upsert_profile(&profiles_path, &install_dir, &forge_version, ram_mb) {
@@ -297,10 +339,16 @@ async fn install_forge(
         dest
     };
 
-    let install_dir_str = install_dir.to_str().unwrap_or_default();
+    // Forge устанавливается в стандартный .minecraft (там уже есть ванильный клиент).
+    // Наш install_dir используется только как gameDir в launcher_profiles.json.
+    let minecraft_dir = dirs::data_dir()
+        .unwrap_or_default()
+        .join(".minecraft");
+    std::fs::create_dir_all(&minecraft_dir).ok();
+    let install_dir_str = minecraft_dir.to_str().unwrap_or_default();
 
-    // Forge требует launcher_profiles.json в целевой папке — создаём минимальный если нет
-    let profiles_path = install_dir.join("launcher_profiles.json");
+    // Forge требует launcher_profiles.json в .minecraft — создаём минимальный если нет
+    let profiles_path = minecraft_dir.join("launcher_profiles.json");
     if !profiles_path.exists() {
         let minimal = serde_json::json!({
             "profiles": {},
@@ -373,7 +421,14 @@ async fn update_configs(install_dir: &Path, manifest: &manifest::Manifest) -> an
     let zip_file = std::fs::File::open(&zip_path)?;
     let mut archive = zip::ZipArchive::new(zip_file)?;
 
-    let target_prefixes = ["config/", "kubejs/", "defaultconfigs/", "resourcepacks/", "patchouli_books/"];
+    let target_prefixes = [
+        "config/",
+        "kubejs/",
+        "defaultconfigs/",
+        "resourcepacks/",
+        "patchouli_books/",
+        "visual_keybinder/",
+    ];
 
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;

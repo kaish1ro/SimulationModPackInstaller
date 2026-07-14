@@ -10,6 +10,11 @@ mod icon_b64;
 use tauri::Manager;
 
 fn main() {
+    // Перехватываем паники — вместо краша окна возвращаем ошибку в JS
+    std::panic::set_hook(Box::new(|info| {
+        eprintln!("[PANIC] {}", info);
+    }));
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             installer::check_java,

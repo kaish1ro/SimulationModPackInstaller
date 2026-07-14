@@ -24,5 +24,8 @@ anyhow = "1"
 dirs = "5"
 which = "4"
 
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+
 [features]
 custom-protocol = ["tauri/custom-protocol"]

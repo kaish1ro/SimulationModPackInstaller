@@ -177,8 +177,10 @@ function App() {
       setPhase("done");
       setProgress(1);
     } catch (e) {
-      pushLog("err", "✗ " + e);
+      pushLog("err", "✗ " + String(e));
+      setStage("Ошибка установки");
       setPhase("idle");
+      setProgress(0);
     }
   }, [phase, dir, pushLog]);
 
@@ -190,11 +192,19 @@ function App() {
     pushLog("info", "🔍 проверка обновлений…");
     try {
       const changed = await invoke('check_updates', { installDir: dir });
+      const removed  = changed.filter(n => n.startsWith("[REMOVED] "));
+      const updated  = changed.filter(n => !n.startsWith("[REMOVED] "));
       if (changed.length === 0) {
         pushLog("ok", "✓ сборка актуальна");
         setUpdateCount(0);
       } else {
-        pushLog("info", `найдено изменений: ${changed.length}. Загружаю…`);
+        const parts = [];
+        if (updated.length)  parts.push(`обновлений: ${updated.length}`);
+        if (removed.length)  parts.push(`удалено из сборки: ${removed.length}`);
+        pushLog("info", `найдено — ${parts.join(" · ")}. Применяю…`);
+        if (removed.length) {
+          removed.forEach(n => pushLog("info", `  удаляю: ${n.replace("[REMOVED] ", "")}`));
+        }
         await invoke('apply_updates', { installDir: dir });
         pushLog("ok", "✓ обновление завершено");
         setUpdateCount(0);

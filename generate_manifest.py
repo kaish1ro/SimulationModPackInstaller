@@ -48,7 +48,7 @@ def main():
         sha = sha256_file(path)
         mods.append({
             "name": name,
-            "url": f"{base_url}/{name}",
+            "url": f"{base_url}/{name.replace(' ', '.')}",
             "sha256": sha,
             "size": size,
         })

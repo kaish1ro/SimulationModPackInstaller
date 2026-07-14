@@ -70,7 +70,7 @@ function InstallPanel({
       )}
 
       {/* ── кнопка установки ── */}
-      {!done && !installing && (
+      {!done && !busy && (
         <div className="actions">
           <button className="btn btn-primary btn-lg" onClick={onInstall} disabled={busy || !dir}>
             <Icon d={Icons.download} size={15} />
@@ -79,7 +79,7 @@ function InstallPanel({
         </div>
       )}
 
-      {/* ── прогресс: только во время установки ── */}
+      {/* ── прогресс-бар: только во время установки ── */}
       {(installing || checking) && (
         <div className="progress-wrap">
           <div className="progress-head">
@@ -89,14 +89,13 @@ function InstallPanel({
           <div className="progress-track" style={{ marginBottom: 12 }}>
             <div className="progress-fill" style={{ width: progress * 100 + "%" }} />
           </div>
-          <LogView lines={log} busy={busy} />
         </div>
       )}
 
-      {/* ── лог после установки (без прогресс-бара) ── */}
-      {done && log.length > 0 && (
-        <div style={{ marginTop: 12 }}>
-          <LogView lines={log} busy={false} />
+      {/* ── лог: показываем пока есть записи (включая после ошибки) ── */}
+      {log.length > 0 && (
+        <div style={{ marginTop: installing ? 0 : 12 }}>
+          <LogView lines={log} busy={busy} />
         </div>
       )}
     </div>
