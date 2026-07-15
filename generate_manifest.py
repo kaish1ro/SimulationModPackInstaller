@@ -2,7 +2,7 @@
 Генератор manifest.json для SimulationModPack.
 
 Использование:
-  python generate_manifest.py --mods-dir ../clientALLMODS/mods --release-tag v0.1.0
+  python generate_manifest.py --mods-dir ../clientALLMODS/mods --release-tag v0.1.1
 
 Генерирует manifest.json с SHA256-хешами и URL для скачивания с GitHub Releases.
 Готовый файл кладёт в корень репозитория сборки.
@@ -31,8 +31,8 @@ def sha256_file(path: str) -> str:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mods-dir", required=True, help="Путь к папке mods/")
-    parser.add_argument("--release-tag", default="v0.1.0", help="Тег GitHub Release")
-    parser.add_argument("--version", default="0.1.0", help="Версия сборки")
+    parser.add_argument("--release-tag", default="v0.1.1", help="Тег GitHub Release")
+    parser.add_argument("--version", default="0.1.1", help="Версия сборки")
     parser.add_argument("--out", default="../clientALLMODS/manifest.json", help="Куда сохранить")
     args = parser.parse_args()
 
